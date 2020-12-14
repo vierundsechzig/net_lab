@@ -23,8 +23,34 @@
  */
 void ip_in(buf_t *buf)
 {
-    // TODO 
-
+    if (buf->len >= 20)
+    {
+        ip_hdr_t ip_header;
+        memcpy(&ip_header, buf->data, sizeof ip_header);
+        uint16_t checksum = checksum16((uint16_t*) &ip_header, sizeof (ip_hdr_t));
+        if (ip_header.version == IP_VERSION_4 && checksum == 0) // 有效IPv4包
+        {
+            if (memcmp(ip_header.dest_ip, net_if_ip, NET_IP_LEN) == 0)
+            {
+                switch (ip_header.protocol)
+                {
+                    case (uint8_t) NET_PROTOCOL_ICMP:
+                        buf_remove_header(buf, sizeof (ip_hdr_t));
+                        icmp_in(buf, ip_header.src_ip);
+                        break;
+                    case (uint8_t) NET_PROTOCOL_UDP:
+                        buf_remove_header(buf, sizeof (ip_hdr_t));
+                        udp_in(buf, ip_header.src_ip);
+                        break;
+                    case (uint8_t) NET_PROTOCOL_TCP:
+                        break;
+                    default:
+                        icmp_unreachable(buf, ip_header.src_ip, ICMP_TYPE_UNREACH);
+                        break;
+                }
+            }
+        } 
+    }
 }
 
 /**
@@ -43,8 +69,26 @@ void ip_in(buf_t *buf)
  */
 void ip_fragment_out(buf_t *buf, uint8_t *ip, net_protocol_t protocol, int id, uint16_t offset, int mf)
 {
-    // TODO
-    
+    buf_t ip_buf;
+    buf_copy(&ip_buf, buf);
+    buf_add_header(&ip_buf, sizeof (ip_hdr_t));
+    uint16_t checksum;
+    ip_hdr_t ip_header;
+    ip_header.version = IP_VERSION_4;
+    ip_header.hdr_len = sizeof (ip_hdr_t) / 4;
+    ip_header.tos = 0x00;
+    ip_header.total_len = swap16(buf->len + sizeof (ip_hdr_t));
+    ip_header.id = swap16(id);
+    ip_header.flags_fragment = swap16(offset | (mf ? (IP_MORE_FRAGMENT) << 8 : 0));
+    ip_header.ttl = 64;
+    ip_header.protocol = (uint8_t) protocol;
+    ip_header.hdr_checksum = 0;
+    memcpy(ip_header.src_ip, net_if_ip, NET_IP_LEN);
+    memcpy(ip_header.dest_ip, ip, NET_IP_LEN);
+    checksum = checksum16((uint16_t *) &ip_header, sizeof (ip_hdr_t));
+    ip_header.hdr_checksum = checksum;
+    memcpy(ip_buf.data, &ip_header, sizeof (ip_hdr_t));
+    arp_out(&ip_buf, ip, NET_PROTOCOL_IP);
 }
 
 /**
@@ -67,6 +111,23 @@ void ip_fragment_out(buf_t *buf, uint8_t *ip, net_protocol_t protocol, int id, u
  */
 void ip_out(buf_t *buf, uint8_t *ip, net_protocol_t protocol)
 {
-    // TODO 
-    
+    // TODO
+    static const int offset_step = (1500 - sizeof (ip_hdr_t)) / 8;
+    int len = buf->len;
+    int id = 0;
+    int offset = 0;
+    uint8_t* p = buf->data;
+    while (len > 1500 - sizeof (ip_hdr_t))
+    {
+        buf_init(&txbuf, 1500 - sizeof (ip_hdr_t));
+        memcpy(txbuf.data, p, 1500 - sizeof (ip_hdr_t));
+        ip_fragment_out(&txbuf, ip, protocol, id, offset, 1);
+        len -= 1500 - sizeof (ip_hdr_t);
+        ++id;
+        offset += offset_step;
+        p += (1500 - sizeof (ip_hdr_t));
+    }
+    buf_init(&txbuf, len);
+    memcpy(txbuf.data, p, 1500 - sizeof (ip_hdr_t));
+    ip_fragment_out(&txbuf, ip, protocol, id, offset, 0);
 }
