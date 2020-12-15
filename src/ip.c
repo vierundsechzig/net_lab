@@ -4,6 +4,8 @@
 #include "udp.h"
 #include <string.h>
 
+int id = 0;
+
 /**
  * @brief 处理一个收到的数据包
  *        你首先需要做报头检查，检查项包括：版本号、总长度、首部长度等。
@@ -43,9 +45,8 @@ void ip_in(buf_t *buf)
                         udp_in(buf, ip_header.src_ip);
                         break;
                     case (uint8_t) NET_PROTOCOL_TCP:
-                        break;
                     default:
-                        icmp_unreachable(buf, ip_header.src_ip, ICMP_TYPE_UNREACH);
+                        icmp_unreachable(buf, ip_header.src_ip, ICMP_CODE_PROTOCOL_UNREACH);
                         break;
                 }
             }
@@ -114,7 +115,6 @@ void ip_out(buf_t *buf, uint8_t *ip, net_protocol_t protocol)
     // TODO
     static const int offset_step = (1500 - sizeof (ip_hdr_t)) / 8;
     int len = buf->len;
-    int id = 0;
     int offset = 0;
     uint8_t* p = buf->data;
     while (len > 1500 - sizeof (ip_hdr_t))
@@ -123,11 +123,11 @@ void ip_out(buf_t *buf, uint8_t *ip, net_protocol_t protocol)
         memcpy(txbuf.data, p, 1500 - sizeof (ip_hdr_t));
         ip_fragment_out(&txbuf, ip, protocol, id, offset, 1);
         len -= 1500 - sizeof (ip_hdr_t);
-        ++id;
         offset += offset_step;
         p += (1500 - sizeof (ip_hdr_t));
     }
     buf_init(&txbuf, len);
     memcpy(txbuf.data, p, 1500 - sizeof (ip_hdr_t));
     ip_fragment_out(&txbuf, ip, protocol, id, offset, 0);
+    ++id;
 }
