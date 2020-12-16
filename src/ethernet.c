@@ -55,7 +55,6 @@ void ethernet_out(buf_t *buf, const uint8_t *mac, net_protocol_t protocol)
     buf_copy(&eth_buf, buf);
     buf_add_header(&eth_buf, sizeof (ether_hdr_t));
     memcpy(eth_buf.data, &header, sizeof (ether_hdr_t));
-    uint8_t* p = eth_buf.data;
     driver_send(&eth_buf);
 }
 
