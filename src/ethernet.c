@@ -16,8 +16,22 @@
  */
 void ethernet_in(buf_t *buf)
 {
-    // TODO
-    
+    uint8_t highbyte = buf->data[12];
+    uint8_t lowbyte = buf->data[13];
+    uint16_t type = (uint16_t) highbyte << 8 | lowbyte;
+    switch (type)
+    {
+        case NET_PROTOCOL_IP:
+            buf_remove_header(buf, sizeof (ether_hdr_t));
+            ip_in(buf);
+            break;
+        case NET_PROTOCOL_ARP:
+            buf_remove_header(buf, sizeof (ether_hdr_t));
+            arp_in(buf);
+            break;
+        default:
+            break;
+    }
 }
 
 /**
@@ -26,13 +40,23 @@ void ethernet_in(buf_t *buf)
  *        添加完成后将以太网数据帧发送到驱动层
  * 
  * @param buf 要处理的数据包
- * @param mac 目标mac地址
+ * @param mac 目标ip地址
  * @param protocol 上层协议
  */
 void ethernet_out(buf_t *buf, const uint8_t *mac, net_protocol_t protocol)
 {
-    // TODO
-
+    ether_hdr_t header;
+    buf_t eth_buf;
+    memcpy(header.dest, mac, NET_MAC_LEN);
+    memcpy(header.src, net_if_mac, NET_MAC_LEN);
+    uint8_t highbyte = (uint16_t) protocol >> 8;
+    uint8_t lowbyte = (uint16_t) protocol & 0xff;
+    header.protocol = (uint16_t) lowbyte << 8 | highbyte;
+    buf_copy(&eth_buf, buf);
+    buf_add_header(&eth_buf, sizeof (ether_hdr_t));
+    memcpy(eth_buf.data, &header, sizeof (ether_hdr_t));
+    uint8_t* p = eth_buf.data;
+    driver_send(&eth_buf);
 }
 
 /**

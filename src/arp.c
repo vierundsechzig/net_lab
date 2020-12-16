@@ -44,8 +44,38 @@ arp_buf_t arp_buf;
  */
 void arp_update(uint8_t *ip, uint8_t *mac, arp_state_t state)
 {
-    // TODO
-
+    int i, j;
+    time_t t = 0;
+    time_t current_t = time(NULL);
+    j = -1;
+    // check for timeout
+    for (i = 0; i < ARP_MAX_ENTRY; ++i)
+        if (arp_table[i].state == ARP_VALID && arp_table[i].timeout >= current_t)
+            arp_table[i].state == ARP_INVALID;
+    for (i = 0; i < ARP_MAX_ENTRY; ++i)
+    {
+        if (arp_table[i].timeout > t)
+        {
+            j = i;
+            t = arp_table[i].timeout;
+        }
+        if (arp_table[i].state == ARP_INVALID)
+        {
+            arp_table[i].state = state;
+            memcpy(arp_table[i].mac, mac, NET_MAC_LEN);
+            memcpy(arp_table[i].ip, ip, NET_IP_LEN);
+            arp_table[i].timeout = time(NULL) + ARP_TIMEOUT_SEC;
+            break;
+        }
+    }
+    // did not find invalid entry
+    if (i == ARP_MAX_ENTRY)
+    {
+        arp_table[j].state = state;
+        memcpy(arp_table[j].mac, mac, NET_MAC_LEN);
+        memcpy(arp_table[j].ip, ip, NET_IP_LEN);
+        arp_table[j].timeout = time(NULL) + ARP_TIMEOUT_SEC;
+    }
 }
 
 /**
@@ -72,8 +102,15 @@ static uint8_t *arp_lookup(uint8_t *ip)
  */
 static void arp_req(uint8_t *target_ip)
 {
-    // TODO
-
+    static const uint8_t broadcast[NET_MAC_LEN] = {0xff, 0xff, 0xff, 0xff, 0xff, 0xff};
+    buf_init(&txbuf, sizeof (arp_pkt_t));
+    arp_pkt_t pack;
+    memcpy(&pack, &arp_init_pkt, sizeof (arp_pkt_t));
+    memcpy(pack.sender_ip, net_if_ip, NET_IP_LEN);
+    memcpy(pack.target_ip, target_ip, NET_IP_LEN);
+    pack.opcode = swap16(ARP_REQUEST);
+    memcpy(txbuf.data, (uint8_t*) &pack, sizeof (arp_pkt_t));
+    ethernet_out(&txbuf, broadcast, NET_PROTOCOL_ARP);
 }
 
 /**
@@ -95,7 +132,48 @@ static void arp_req(uint8_t *target_ip)
  */
 void arp_in(buf_t *buf)
 {
-    // TODO
+    if (buf->len < sizeof (arp_pkt_t)) // invalid arp packet
+        return;
+    uint8_t sender_mac[NET_MAC_LEN];
+    uint8_t sender_ip[NET_IP_LEN];
+    uint8_t target_ip[NET_IP_LEN];
+    memcpy(sender_mac, buf->data + 8, NET_MAC_LEN);
+    memcpy(sender_ip, buf->data + 8 + NET_MAC_LEN, NET_IP_LEN);
+    memcpy(target_ip, buf->data + 8 + NET_MAC_LEN + NET_IP_LEN + NET_MAC_LEN, NET_IP_LEN);
+    arp_update(sender_ip, sender_mac, ARP_VALID);
+    if (arp_buf.valid == 1)
+    {
+        uint8_t* ptr_mac = arp_lookup(arp_buf.ip);
+        if (ptr_mac != NULL)
+        {
+            ethernet_out(&arp_buf.buf, ptr_mac, arp_buf.protocol);
+            arp_buf.valid = 0;
+        }
+    }
+    else
+    {
+        uint16_t opcode = swap16(*((uint16_t*)(buf->data + 6)));
+        int eq = 1;
+        for (int i=0; i<NET_IP_LEN; ++i)
+        {
+            if (target_ip[i] != net_if_ip[i])
+            {
+                eq = 0;
+                break;
+            }
+        }
+        if (opcode == ARP_REQUEST && eq)
+        {
+            arp_pkt_t pack;
+            buf_init(&txbuf, sizeof (arp_pkt_t));
+            memcpy(&pack, &arp_init_pkt, sizeof (arp_pkt_t));
+            pack.opcode = swap16(ARP_REPLY);
+            memcpy(pack.target_ip, sender_ip, NET_IP_LEN);
+            memcpy(pack.target_mac, sender_mac, NET_MAC_LEN);
+            memcpy(txbuf.data, (uint8_t*) &pack, sizeof (arp_pkt_t));
+            ethernet_out(&txbuf, sender_mac, NET_PROTOCOL_ARP);
+        }
+    }
     
 }
 
@@ -112,8 +190,18 @@ void arp_in(buf_t *buf)
  */
 void arp_out(buf_t *buf, uint8_t *ip, net_protocol_t protocol)
 {
-    // TODO
-
+    uint8_t* ptr_mac = arp_lookup(ip);
+    if (ptr_mac != NULL)
+        ethernet_out(buf, ptr_mac, protocol);
+    else
+    {
+        arp_req(ip);
+        // keep this packet vin buffer
+        arp_buf.valid = 1;
+        buf_copy(&arp_buf.buf, buf);
+        memcpy(arp_buf.ip, ip, NET_IP_LEN);
+        arp_buf.protocol = protocol;
+    }
 }
 
 /**

@@ -83,5 +83,16 @@ void buf_copy(buf_t *dst, buf_t *src)
 uint16_t checksum16(uint16_t *buf, int len)
 {
     // TODO
-        
+    uint32_t checksum = 0;
+    int i = 0;
+    while (i < len / 2)
+    {
+        checksum += buf[i];
+        if (checksum >> 16) // 有进位
+            checksum = (checksum & 0xffff) + 1;
+        if (checksum >> 16) // 还有进位，则原checksum低16位为0xffff
+            checksum = 1;
+        ++i;
+    }
+    return ~(uint16_t) (checksum & 0xffff);
 }
