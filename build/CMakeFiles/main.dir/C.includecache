@@ -72,3 +72,15 @@ net.h
 udp.h
 /home/nikolaus/net_lab/src/udp.h
 
+/home/nikolaus/net_lab/src/net.c
+net.h
+/home/nikolaus/net_lab/src/net.h
+arp.h
+/home/nikolaus/net_lab/src/arp.h
+udp.h
+/home/nikolaus/net_lab/src/udp.h
+ethernet.h
+/home/nikolaus/net_lab/src/ethernet.h
+stdio.h
+-
+

@@ -2,6 +2,7 @@
 #include "arp.h"
 #include "udp.h"
 #include "ethernet.h"
+#include <stdio.h>
 
 /**
  * @brief 初始化协议栈
