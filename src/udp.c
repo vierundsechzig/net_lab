@@ -28,8 +28,42 @@ static udp_entry_t udp_table[UDP_MAX_HANDLER];
  */
 static uint16_t udp_checksum(buf_t *buf, uint8_t *src_ip, uint8_t *dest_ip)
 {
-    // TODO
-    
+    udp_hdr_t hdr;
+    memcpy(&hdr, buf->data, sizeof (udp_hdr_t));
+    udp_peso_hdr_t temp, peso_hdr;
+    int len = swap16(hdr.total_len);
+    buf_add_header(buf, sizeof (udp_peso_hdr_t));
+    memcpy(&temp, buf->data, sizeof (udp_peso_hdr_t));
+    memcpy(peso_hdr.src_ip, src_ip, NET_IP_LEN);
+    memcpy(peso_hdr.dest_ip, dest_ip, NET_IP_LEN);
+    peso_hdr.placeholder = 0;
+    peso_hdr.protocol = NET_PROTOCOL_UDP;
+    peso_hdr.total_len = swap16(len);
+    memcpy(buf->data, &peso_hdr, sizeof (udp_peso_hdr_t));
+    uint32_t checksum = 0;
+    int i = 0;
+    while (i < (len + sizeof (udp_peso_hdr_t)) / 2)
+    {
+        checksum += ((uint16_t*) buf->data)[i];
+        if (checksum >> 16) // 有进位
+            checksum = (checksum & 0xffff) + 1;
+        if (checksum >> 16) // 还有进位，则原checksum低16位为0xffff
+            checksum = 1;
+        ++i;
+    }
+    if ((len + sizeof (udp_peso_hdr_t)) % 2)
+    {
+        int data = ((uint16_t*) buf->data)[i];
+        uint16_t valid = data & 0xff;
+        checksum += valid;
+        if (checksum >> 16) // 有进位
+            checksum = (checksum & 0xffff) + 1;
+        if (checksum >> 16) // 还有进位，则原checksum低16位为0xffff
+            checksum = 1;
+    }
+    memcpy(buf->data, &temp, sizeof (udp_peso_hdr_t));
+    buf_remove_header(buf, sizeof (udp_peso_hdr_t));
+    return ~(uint16_t) (checksum & 0xffff);
 }
 
 /**
@@ -52,8 +86,30 @@ static uint16_t udp_checksum(buf_t *buf, uint8_t *src_ip, uint8_t *dest_ip)
  */
 void udp_in(buf_t *buf, uint8_t *src_ip)
 {
-    // TODO
-
+    if (buf->len >= sizeof (udp_hdr_t))
+    {
+        int checksum = udp_checksum(buf, src_ip, net_if_ip);
+        if (checksum == 0)
+        {
+            udp_hdr_t header;
+            memcpy(&header, buf->data, sizeof (udp_hdr_t));
+            int i;
+            for (i=0; i<UDP_MAX_HANDLER; ++i)
+            {
+                if (udp_table[i].valid && udp_table[i].port == swap16(header.dest_port))
+                {
+                    buf_remove_header(buf, sizeof (udp_hdr_t));
+                    udp_table[i].handler(&udp_table[i], src_ip, swap16(header.src_port), buf); // 调用回调函数
+                    break;
+                }
+            }
+            if (i == UDP_MAX_HANDLER)
+            {
+                buf_add_header(buf, sizeof (ip_hdr_t));
+                icmp_unreachable(buf, src_ip, ICMP_CODE_PORT_UNREACH);
+            }
+        }
+    }
 }
 
 /**
@@ -71,7 +127,19 @@ void udp_in(buf_t *buf, uint8_t *src_ip)
 void udp_out(buf_t *buf, uint16_t src_port, uint8_t *dest_ip, uint16_t dest_port)
 {
     // TODO
-
+    udp_hdr_t header;
+    buf_t udp_buf;
+    header.src_port = swap16(src_port);
+    header.dest_port = swap16(dest_port);
+    header.total_len = swap16(sizeof (udp_hdr_t) + buf->len);
+    header.checksum = 0;
+    buf_copy(&udp_buf, buf);
+    buf_add_header(&udp_buf, sizeof (udp_hdr_t));
+    memcpy(udp_buf.data, &header, sizeof (udp_hdr_t));
+    uint16_t checksum = udp_checksum(&udp_buf, net_if_ip, dest_ip);
+    header.checksum = checksum;
+    memcpy(udp_buf.data, &header, sizeof (udp_hdr_t));
+    ip_out(&udp_buf, dest_ip, NET_PROTOCOL_UDP);
 }
 
 /**
